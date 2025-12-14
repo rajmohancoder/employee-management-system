@@ -51,7 +51,7 @@ const MENU_ITEMS: MenuItem[] = [
         isCollapsible: true,
         items: [
             { label: "All Employees", href: "/dashboard/employees", icon: <Users className="w-4 h-4" /> },
-            { label: "Add Employee", href: "/dashboard/employees/new", icon: <UserPlus className="w-4 h-4" /> }
+            { label: "Add Employee", href: "/add-employee", icon: <UserPlus className="w-4 h-4" /> }
         ]
     },
     {

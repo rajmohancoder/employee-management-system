@@ -2,7 +2,7 @@ import React from 'react';
 import { Sidebar } from '@/components/Sidebar';
 import { Header } from '@/components/Header';
 
-export default function DashboardLayout({
+export default function AddEmployeeLayout({
     children,
 }: {
     children: React.ReactNode;
@@ -14,8 +14,8 @@ export default function DashboardLayout({
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col min-w-0">
-                {/* Header */}
-                <Header />
+                {/* Header with Search Disabled */}
+                <Header showSearch={false} />
 
                 {/* Page Content */}
                 <main className="flex-1 p-4 md:p-8 overflow-y-auto overflow-x-hidden">
@@ -25,4 +25,3 @@ export default function DashboardLayout({
         </div>
     );
 }
-
