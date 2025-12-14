@@ -3,9 +3,10 @@
 import { zodResolver } from "@hookform/resolvers/zod"
 import { useForm, useFieldArray } from "react-hook-form"
 import { z } from "zod"
-import { CalendarIcon, UploadCloud, Save, Plus, Trash2, RefreshCw, IndianRupee, User } from "lucide-react"
+import { CalendarIcon, UploadCloud, Save, Plus, Trash2, RefreshCw, IndianRupee, User, Fingerprint, Check, ChevronsUpDown } from "lucide-react"
 import { format } from "date-fns"
-import { useState, useEffect } from "react"
+import { enIN } from "date-fns/locale"
+import { useState } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -18,11 +19,14 @@ import {
 } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+
 import { Calendar } from "@/components/ui/calendar"
 import { cn } from "@/lib/utils"
 // Ensure you have this component or use standard Select if not available.
@@ -47,7 +51,29 @@ const CITIES: Record<string, string[]> = {
     "Telangana": ["Hyderabad", "Warangal", "Nizamabad", "Karimnagar"],
 };
 
-const MANAGERS = ["Rajesh Kumar", "Priya Sharma", "Amit Patel", "Neha Gupta", "Vikram Singh"] as const;
+const MANAGERS = [
+    { name: "Rajesh Kumar", initials: "RK", color: "bg-blue-500" },
+    { name: "Priya Sharma", initials: "PS", color: "bg-purple-500" },
+    { name: "Amit Patel", initials: "AP", color: "bg-green-500" },
+    { name: "Neha Gupta", initials: "NG", color: "bg-pink-500" },
+    { name: "Vikram Singh", initials: "VS", color: "bg-orange-500" }
+];
+
+const JOB_TITLES = [
+    "Software Engineer",
+    "Data Analyst",
+    "Product Manager",
+    "UX Designer",
+    "QA Engineer",
+    "HR Specialist",
+    "Finance Analyst",
+    "Marketing Specialist",
+    "Sales Executive",
+    "Customer Support",
+    "Other"
+] as const;
+
+const RELATIONSHIPS = ["mother", "father", "brother", "sister", "spouse", "friend", "cousin", "child", "other"] as const;
 
 const formatPhoneNumber = (value: string): string => {
     let cleaned = value.replace(/\D/g, "");
@@ -58,17 +84,35 @@ const formatPhoneNumber = (value: string): string => {
     return `${cleaned.slice(0, 5)} ${cleaned.slice(5)}`;
 };
 
+const formatYear = (value: string): string => {
+    let cleaned = value.replace(/\D/g, "");
+    if (cleaned.length > 4) cleaned = cleaned.slice(0, 4);
+    return cleaned;
+};
+
 // --- Schema ---
 const employeeFormSchema = z.object({
-    firstName: z.string().min(1, "Please enter your first name").min(2, "First name must be at least 2 characters"),
-    lastName: z.string().min(1, "Please enter your last name").min(2, "Last name must be at least 2 characters"),
+    firstName: z.string()
+        .min(1, "Please enter your first name")
+        .min(2, "First name must be at least 2 characters")
+        .max(30, "First name must not exceed 30 characters")
+        .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
+    lastName: z.string()
+        .min(1, "Please enter your last name")
+        .max(30, "Last name must not exceed 30 characters")
+        .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
     profilePicture: z.any()
         .refine((file) => !file || file.size <= 2 * 1024 * 1024, "Max file size is 2MB")
         .refine(
             (file) => !file || ["image/jpeg", "image/png", "image/jpg"].includes(file.type),
             "Only .jpg, .jpeg, .png formats are supported"
         ).optional(),
-    dob: z.date({ message: "Please select your date of birth" }),
+    dob: z.date({ message: "Please select your date of birth" })
+        .refine((date) => {
+            const today = new Date();
+            const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+            return date <= eighteenYearsAgo;
+        }, "Age should be greater than 18 years"),
     bloodGroup: z.string().min(1, "Please select your blood group"),
     gender: z.enum(["male", "female", "other"], { message: "Please select your gender" }),
     maritalStatus: z.string().optional(),
@@ -80,7 +124,10 @@ const employeeFormSchema = z.object({
     address: z.string().optional(),
 
     emergencyContacts: z.array(z.object({
-        name: z.string().min(1, "Please enter contact's name"),
+        name: z.string()
+            .min(2, "Name must be at least 2 characters")
+            .max(30, "Name must not exceed 30 characters")
+            .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
         relationship: z.string().min(1, "Please select relationship"),
         phone: z.string().min(1, "Please enter phone number").regex(/^\d{5}\s\d{5}$/, "Phone number must be 10 digits"),
     })).min(1, "Please add at least one emergency contact").max(2, "Maximum 2 emergency contacts allowed"),
@@ -105,18 +152,27 @@ const employeeFormSchema = z.object({
     identityProofFiles: z.array(z.any()).optional(),
 
     qualifications: z.array(z.object({
-        degree: z.string().min(1, "Please enter degree name"),
-        institution: z.string().min(1, "Please enter institution name"),
-        passingYear: z.string().min(1, "Please enter passing year"),
+        degree: z.string()
+            .min(2, "Degree must be at least 2 characters")
+            .max(30, "Degree must not exceed 30 characters")
+            .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
+        institution: z.string()
+            .min(2, "Institution must be at least 2 characters")
+            .max(30, "Institution must not exceed 30 characters")
+            .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
+        passingYear: z.string().regex(/^(19|20)\d{2}$/, "Year must be in YYYY format (19XX or 20XX)"),
     })).max(3, "Maximum 3 qualifications allowed"),
 })
 
 type EmployeeFormValues = z.infer<typeof employeeFormSchema>
 
 export default function AddEmployeePage() {
-    const today = new Date();
-    const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+    const today = new Date('2024-12-14');
+    const eighteenYearsAgo = new Date('2006-12-14');
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [employeeIdError, setEmployeeIdError] = useState<string>("");
+    const [isEmployeeIdGenerated, setIsEmployeeIdGenerated] = useState<boolean>(false);
+    const [managerSearchOpen, setManagerSearchOpen] = useState(false);
 
     const form = useForm<EmployeeFormValues>({
         resolver: zodResolver(employeeFormSchema) as any,
@@ -151,7 +207,7 @@ export default function AddEmployeePage() {
             bankDoc: undefined,
             identityProofTypes: [],
             identityProofFiles: [],
-            emergencyContacts: [{ name: "", relationship: "", phone: "" }],
+            emergencyContacts: [{ name: "", relationship: undefined, phone: "" }],
             qualifications: [{ degree: "", institution: "", passingYear: "" }],
         },
     })
@@ -179,9 +235,10 @@ export default function AddEmployeePage() {
     const generateEmployeeId = () => {
         const dept = form.getValues("department");
         if (!dept) {
-            alert("Please select a department first.");
+            setEmployeeIdError("Please select a department first");
             return;
         }
+        setEmployeeIdError("");
 
         const deptCodeMap: Record<string, string> = {
             "engineering": "ENG",
@@ -196,6 +253,50 @@ export default function AddEmployeePage() {
         const newId = `EMP-${code}-${year}-${rand}`;
 
         form.setValue("employeeId", newId);
+        setIsEmployeeIdGenerated(true);
+    };
+
+    // Helper function to get first error field for a row
+    const getFirstErrorField = (errors: any, fields: string[]) => {
+        if (!errors) return null;
+        for (const field of fields) {
+            if (errors[field]) return field;
+        }
+        return null;
+    };
+
+    // Helper function to get first error in array fields
+    const getFirstArrayError = (errors: any, arrayName: string, fields: string[]) => {
+        if (!errors || !errors[arrayName]) return null;
+        for (let i = 0; i < errors[arrayName].length; i++) {
+            const rowErrors = errors[arrayName][i];
+            if (rowErrors) {
+                for (const field of fields) {
+                    if (rowErrors[field]) {
+                        return { index: i, field };
+                    }
+                }
+            }
+        }
+        return null;
+    };
+
+    // Check if emergency contacts have any errors
+    const hasContactErrors = () => {
+        return !!form.formState.errors.emergencyContacts;
+    };
+
+    // Check if qualifications have any errors
+    const hasQualificationErrors = () => {
+        return !!form.formState.errors.qualifications;
+    };
+
+    // Check if the last emergency contact is fully filled
+    const isLastContactFilled = () => {
+        const contacts = form.watch("emergencyContacts");
+        if (contacts.length === 0) return false;
+        const last = contacts[contacts.length - 1];
+        return last.name.trim() && last.relationship && last.phone.trim();
     };
 
     function onSubmit(data: EmployeeFormValues) {
@@ -278,7 +379,7 @@ export default function AddEmployeePage() {
                                                             )}
                                                         >
                                                             {field.value ? (
-                                                                format(field.value, "dd/MM/yyyy")
+                                                                format(field.value, "dd/MM/yyyy", { locale: enIN })
                                                             ) : (
                                                                 <span>dd/mm/yyyy</span>
                                                             )}
@@ -291,13 +392,14 @@ export default function AddEmployeePage() {
                                                         mode="single"
                                                         selected={field.value}
                                                         onSelect={field.onChange}
-                                                        disabled={(date) =>
-                                                            date > new Date() || date < new Date("1900-01-01")
-                                                        }
-                                                        initialFocus
+                                                        disabled={(date) => {
+                                                            const today = new Date();
+                                                            const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
+                                                            return date > eighteenYearsAgo || date < new Date("1900-01-01");
+                                                        }}
                                                         captionLayout="dropdown"
                                                         fromYear={1900}
-                                                        toYear={new Date().getFullYear()}
+                                                        toYear={new Date().getFullYear() - 18}
                                                     />
                                                 </PopoverContent>
                                             </Popover>
@@ -481,10 +583,12 @@ export default function AddEmployeePage() {
                                                     <Input
                                                         placeholder="XXXXX XXXXX"
                                                         className="pl-14"
+                                                        inputMode="numeric"
                                                         value={field.value}
                                                         onChange={(e) => {
                                                             const formatted = formatPhoneNumber(e.target.value);
                                                             field.onChange(formatted);
+                                                            form.trigger("phone");
                                                         }}
                                                     />
                                                 </FormControl>
@@ -525,7 +629,7 @@ export default function AddEmployeePage() {
                             <div className="mt-6">
                                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Emergency Contacts</h3>
                                 {contactFields.map((field, index) => (
-                                    <div key={field.id} className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-start">
+                                    <div key={field.id} className={`grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 items-start ${form.formState.errors.emergencyContacts?.[index] ? 'border border-red-300 rounded-lg p-3 bg-red-50 dark:bg-red-950/20' : ''}`}>
                                         <FormField
                                             control={form.control}
                                             name={`emergencyContacts.${index}.name`}
@@ -545,65 +649,83 @@ export default function AddEmployeePage() {
                                             render={({ field }) => (
                                                 <FormItem>
                                                     <FormLabel className={index !== 0 ? "sr-only" : ""}>Relationship</FormLabel>
-                                                    <FormControl>
-                                                        <Input placeholder="e.g. Spouse" {...field} />
-                                                    </FormControl>
+                                                    <Select onValueChange={field.onChange} value={field.value}>
+                                                        <FormControl>
+                                                            <SelectTrigger className="w-full">
+                                                                <SelectValue placeholder="Select Relationship" />
+                                                            </SelectTrigger>
+                                                        </FormControl>
+                                                        <SelectContent>
+                                                            {RELATIONSHIPS.map((rel) => (
+                                                                <SelectItem key={rel} value={rel}>{rel.charAt(0).toUpperCase() + rel.slice(1)}</SelectItem>
+                                                            ))}
+                                                        </SelectContent>
+                                                    </Select>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
                                         />
-                                        <div className="flex gap-2 items-start">
-                                            <FormField
-                                                control={form.control}
-                                                name={`emergencyContacts.${index}.phone`}
-                                                render={({ field }) => (
-                                                    <FormItem className="flex-1">
-                                                        <FormLabel className={index !== 0 ? "sr-only" : ""}>Phone</FormLabel>
-                                                        <div className="flex gap-2">
-                                                            <div className="relative flex-1 flex items-center">
-                                                                <div className="absolute left-3 flex items-center pointer-events-none z-10">
-                                                                    <span className="text-sm font-medium text-gray-500 mr-2">+91</span>
-                                                                    <div className="h-4 w-[1px] bg-gray-300 dark:bg-zinc-700"></div>
-                                                                </div>
-                                                                <FormControl>
-                                                                    <Input
-                                                                        placeholder="XXXXX XXXXX"
-                                                                        className="pl-14"
-                                                                        value={field.value}
-                                                                        onChange={(e) => {
-                                                                            const formatted = formatPhoneNumber(e.target.value);
-                                                                            field.onChange(formatted);
-                                                                        }}
-                                                                    />
-                                                                </FormControl>
-                                                            </div>
-                                                            <Button
-                                                                type="button"
-                                                                variant="outline"
-                                                                size="icon"
-                                                                className="text-red-500 hover:text-red-600 shrink-0"
-                                                                onClick={() => removeContact(index)}
-                                                                disabled={contactFields.length === 1 && index === 0}
-                                                            >
-                                                                <Trash2 className="w-4 h-4" />
-                                                            </Button>
+                                        <FormField
+                                            control={form.control}
+                                            name={`emergencyContacts.${index}.phone`}
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Phone</FormLabel>
+                                                    <div className="relative flex items-center">
+                                                        <div className="absolute left-3 flex items-center pointer-events-none z-10">
+                                                            <span className="text-sm font-medium text-gray-500 mr-2">+91</span>
+                                                            <div className="h-4 w-[1px] bg-gray-300 dark:bg-zinc-700"></div>
                                                         </div>
-                                                        <FormMessage />
-                                                    </FormItem>
-                                                )}
-                                            />
-                                        </div>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder="XXXXX XXXXX"
+                                                                className="pl-14"
+                                                                inputMode="numeric"
+                                                                value={field.value}
+                                                                onChange={(e) => {
+                                                                    const formatted = formatPhoneNumber(e.target.value);
+                                                                    field.onChange(formatted);
+                                                                    form.trigger(`emergencyContacts.${index}.phone`);
+                                                                }}
+                                                            />
+                                                        </FormControl>
+                                                    </div>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                        {index === 0 ? (
+                                            <div />
+                                        ) : (
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="icon"
+                                                className="text-red-500 hover:text-red-600"
+                                                onClick={() => {
+                                                    form.clearErrors(`emergencyContacts.${index}.name`);
+                                                    form.clearErrors(`emergencyContacts.${index}.relationship`);
+                                                    form.clearErrors(`emergencyContacts.${index}.phone`);
+                                                    removeContact(index);
+                                                }}
+                                            >
+                                                <Trash2 className="w-4 h-4" />
+                                            </Button>
+                                        )}
                                     </div>
                                 ))}
-                                <Button
-                                    type="button"
-                                    variant="ghost"
-                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 pl-0 mt-2"
-                                    onClick={() => appendContact({ name: "", relationship: "", phone: "" })}
-                                    disabled={contactFields.length >= 2}
-                                >
-                                    <Plus className="w-4 h-4 mr-2" /> Add Another Contact
-                                </Button>
+                                {contactFields.length < 2 && isLastContactFilled() && (
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 pl-0 mt-2"
+                                        onClick={() => {
+                                            appendContact({ name: "", relationship: "", phone: "" });
+                                        }}
+                                    >
+                                        <Plus className="w-4 h-4 mr-2" /> Add Another Contact
+                                    </Button>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
@@ -624,9 +746,20 @@ export default function AddEmployeePage() {
                                     render={({ field }) => (
                                         <FormItem>
                                             <FormLabel>Job Title <span className="text-red-500">*</span></FormLabel>
-                                            <FormControl>
-                                                <Input placeholder="e.g. Senior Developer" {...field} />
-                                            </FormControl>
+                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                <FormControl>
+                                                    <SelectTrigger className="w-full">
+                                                        <SelectValue placeholder="Select Job Title" />
+                                                    </SelectTrigger>
+                                                </FormControl>
+                                                <SelectContent>
+                                                    {JOB_TITLES.map((title) => (
+                                                        <SelectItem key={title} value={title.toLowerCase().replace(/\s+/g, '-')}>
+                                                            {title}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
                                             <FormMessage />
                                         </FormItem>
                                     )}
@@ -665,13 +798,30 @@ export default function AddEmployeePage() {
                                             <FormLabel>Employee ID</FormLabel>
                                             <div className="flex gap-2">
                                                 <FormControl>
-                                                    <Input placeholder="e.g. EMP-0042" {...field} />
+                                                    <Input
+                                                        placeholder="e.g. EMP-0042"
+                                                        {...field}
+                                                        readOnly
+                                                        onCopy={(e) => e.preventDefault()}
+                                                        onPaste={(e) => e.preventDefault()}
+                                                        onCut={(e) => e.preventDefault()}
+                                                        onContextMenu={(e) => e.preventDefault()}
+                                                        className="cursor-not-allowed bg-muted"
+                                                    />
                                                 </FormControl>
-                                                <Button type="button" variant="outline" onClick={generateEmployeeId}>
-                                                    <RefreshCw className="w-4 h-4 mr-2" /> Generate
+                                                <Button
+                                                    type="button"
+                                                    variant="outline"
+                                                    onClick={generateEmployeeId}
+                                                    disabled={isEmployeeIdGenerated}
+                                                >
+                                                    <Fingerprint className="w-4 h-4 mr-2 text-blue-600" /> Generate
                                                 </Button>
                                             </div>
                                             <FormMessage />
+                                            {employeeIdError && (
+                                                <p className="text-sm font-medium text-destructive mt-1">{employeeIdError}</p>
+                                            )}
                                         </FormItem>
                                     )}
                                 />
@@ -679,20 +829,66 @@ export default function AddEmployeePage() {
                                     control={form.control}
                                     name="reportingManager"
                                     render={({ field }) => (
-                                        <FormItem>
+                                        <FormItem className="flex flex-col">
                                             <FormLabel>Reporting Manager</FormLabel>
-                                            <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                <FormControl>
-                                                    <SelectTrigger className="w-full">
-                                                        <SelectValue placeholder="Choose Reporting Manager" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    {MANAGERS.map((manager) => (
-                                                        <SelectItem key={manager} value={manager}>{manager}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <Popover open={managerSearchOpen} onOpenChange={setManagerSearchOpen}>
+                                                <PopoverTrigger asChild>
+                                                    <FormControl>
+                                                        <Button
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            className={`w-full justify-between ${!field.value && "text-muted-foreground"}`}
+                                                        >
+                                                            {field.value ? (
+                                                                <div className="flex items-center gap-2">
+                                                                    <Avatar className="h-6 w-6">
+                                                                        <AvatarFallback className={`text-xs ${MANAGERS.find(m => m.name === field.value)?.color}`}>
+                                                                            {MANAGERS.find(m => m.name === field.value)?.initials}
+                                                                        </AvatarFallback>
+                                                                    </Avatar>
+                                                                    {field.value}
+                                                                </div>
+                                                            ) : (
+                                                                "Choose Reporting Manager"
+                                                            )}
+                                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                        </Button>
+                                                    </FormControl>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-full p-0" align="start">
+                                                    <Command>
+                                                        <CommandInput placeholder="Search manager..." />
+                                                        <CommandList>
+                                                            <CommandEmpty>No manager found.</CommandEmpty>
+                                                            <CommandGroup>
+                                                                {MANAGERS.map((manager) => (
+                                                                    <CommandItem
+                                                                        key={manager.name}
+                                                                        value={manager.name}
+                                                                        onSelect={() => {
+                                                                            field.onChange(manager.name)
+                                                                            setManagerSearchOpen(false)
+                                                                        }}
+                                                                    >
+                                                                        <div className="flex items-center gap-2 flex-1">
+                                                                            <Avatar className="h-6 w-6">
+                                                                                <AvatarFallback className={`text-xs ${manager.color} text-white`}>
+                                                                                    {manager.initials}
+                                                                                </AvatarFallback>
+                                                                            </Avatar>
+                                                                            {manager.name}
+                                                                        </div>
+                                                                        <Check
+                                                                            className={`ml-auto h-4 w-4 ${field.value === manager.name ? "opacity-100" : "opacity-0"
+                                                                                }`}
+                                                                        />
+                                                                    </CommandItem>
+                                                                ))}
+                                                            </CommandGroup>
+                                                        </CommandList>
+                                                    </Command>
+                                                </PopoverContent>
+                                            </Popover>
                                             <FormMessage />
                                         </FormItem>
                                     )}
@@ -718,7 +914,7 @@ export default function AddEmployeePage() {
                                                             )}
                                                         >
                                                             {field.value ? (
-                                                                format(field.value, "dd/MM/yyyy")
+                                                                format(field.value, "dd/MM/yyyy", { locale: enIN })
                                                             ) : (
                                                                 <span>dd/mm/yyyy</span>
                                                             )}
@@ -731,10 +927,10 @@ export default function AddEmployeePage() {
                                                         mode="single"
                                                         selected={field.value}
                                                         onSelect={field.onChange}
-                                                        initialFocus
+                                                        disabled={(date) => date > today}
                                                         captionLayout="dropdown"
                                                         fromYear={1950}
-                                                        toYear={new Date().getFullYear() + 1}
+                                                        toYear={new Date().getFullYear()}
                                                     />
                                                 </PopoverContent>
                                             </Popover>
@@ -917,7 +1113,7 @@ export default function AddEmployeePage() {
                                             <FormItem>
                                                 <FormLabel className={index !== 0 ? "sr-only" : ""}>Degree</FormLabel>
                                                 <FormControl>
-                                                    <Input placeholder="Degree" {...field} />
+                                                    <Input placeholder="Degree" {...field} onKeyPress={(e) => { if (!/[a-zA-Z\s]/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
                                                 </FormControl>
                                                 <FormMessage />
                                             </FormItem>
@@ -930,7 +1126,7 @@ export default function AddEmployeePage() {
                                             <FormItem>
                                                 <FormLabel className={index !== 0 ? "sr-only" : ""}>Institution</FormLabel>
                                                 <FormControl>
-                                                    <Input placeholder="Institution" {...field} />
+                                                    <Input placeholder="Institution" {...field} onKeyPress={(e) => { if (!/[a-zA-Z\s]/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
                                                 </FormControl>
                                                 <FormMessage />
                                             </FormItem>
@@ -941,17 +1137,22 @@ export default function AddEmployeePage() {
                                         name={`qualifications.${index}.passingYear`}
                                         render={({ field }) => (
                                             <FormItem>
-                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Year</FormLabel>
+                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Year of Completion</FormLabel>
                                                 <div className="flex gap-2">
                                                     <FormControl>
-                                                        <Input placeholder="Year" {...field} />
+                                                        <Input placeholder="YYYY" inputMode="numeric" value={field.value} onChange={(e) => { const formatted = formatYear(e.target.value); field.onChange(formatted); form.trigger(`qualifications.${index}.passingYear`); }} onKeyPress={(e) => { if (!/\d/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
                                                     </FormControl>
                                                     <Button
                                                         type="button"
                                                         variant="outline"
                                                         size="icon"
                                                         className="text-red-500 hover:text-red-600 shrink-0"
-                                                        onClick={() => removeQual(index)}
+                                                        onClick={() => {
+                                                            form.clearErrors(`qualifications.${index}.degree`);
+                                                            form.clearErrors(`qualifications.${index}.institution`);
+                                                            form.clearErrors(`qualifications.${index}.passingYear`);
+                                                            removeQual(index);
+                                                        }}
                                                         disabled={qualFields.length === 1 && index === 0}
                                                     >
                                                         <Trash2 className="w-4 h-4" />
@@ -964,15 +1165,17 @@ export default function AddEmployeePage() {
                                 </div>
                             ))}
 
-                            <Button
-                                type="button"
-                                variant="ghost"
-                                className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 pl-0"
-                                onClick={() => appendQual({ degree: "", institution: "", passingYear: "" })}
-                                disabled={qualFields.length >= 3}
-                            >
-                                <Plus className="w-4 h-4 mr-2" /> Add Another Qualification
-                            </Button>
+
+                            {qualFields.length < 3 && (
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 pl-0"
+                                    onClick={() => appendQual({ degree: "", institution: "", passingYear: "" })}
+                                >
+                                    <Plus className="w-4 h-4 mr-2" /> Add Another Qualification
+                                </Button>
+                            )}
 
                             <Separator className="my-8" />
 
@@ -1073,7 +1276,13 @@ export default function AddEmployeePage() {
 
                     <div className="flex justify-end gap-4 py-8">
                         <Button variant="outline" type="button">Cancel</Button>
-                        <Button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white">Submit Onboarding</Button>
+                        <Button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={!form.formState.isValid}
+                        >
+                            Submit Onboarding
+                        </Button>
                     </div>
                 </form>
             </Form>
