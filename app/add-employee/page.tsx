@@ -25,6 +25,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Textarea } from "@/components/ui/textarea"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog"
 import { Separator } from "@/components/ui/separator"
 
 import { Calendar } from "@/components/ui/calendar"
@@ -173,6 +174,12 @@ export default function AddEmployeePage() {
     const [employeeIdError, setEmployeeIdError] = useState<string>("");
     const [isEmployeeIdGenerated, setIsEmployeeIdGenerated] = useState<boolean>(false);
     const [managerSearchOpen, setManagerSearchOpen] = useState(false);
+    const [stateSearchOpen, setStateSearchOpen] = useState(false);
+    const [citySearchOpen, setCitySearchOpen] = useState(false);
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+    const [contactToDelete, setContactToDelete] = useState<number | null>(null);
+    const [qualDeleteDialogOpen, setQualDeleteDialogOpen] = useState(false);
+    const [qualToDelete, setQualToDelete] = useState<number | null>(null);
 
     const form = useForm<EmployeeFormValues>({
         resolver: zodResolver(employeeFormSchema) as any,
@@ -514,26 +521,49 @@ export default function AddEmployeePage() {
                                     control={form.control}
                                     name="state"
                                     render={({ field }) => (
-                                        <FormItem>
+                                        <FormItem className="flex flex-col">
                                             <FormLabel>State <span className="text-red-500">*</span></FormLabel>
-                                            <Select
-                                                onValueChange={(value) => {
-                                                    field.onChange(value);
-                                                    form.setValue("city", "");
-                                                }}
-                                                value={field.value}
-                                            >
-                                                <FormControl>
-                                                    <SelectTrigger className="w-full">
-                                                        <SelectValue placeholder="Choose State" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    {STATES.map((state) => (
-                                                        <SelectItem key={state} value={state}>{state}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <Popover open={stateSearchOpen} onOpenChange={setStateSearchOpen}>
+                                                <PopoverTrigger asChild>
+                                                    <FormControl>
+                                                        <Button
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            className={`w-full justify-between ${!field.value && "text-muted-foreground"}`}
+                                                        >
+                                                            {field.value || "Choose State"}
+                                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                        </Button>
+                                                    </FormControl>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-full p-0" align="start">
+                                                    <Command>
+                                                        <CommandInput placeholder="Search state..." />
+                                                        <CommandList>
+                                                            <CommandEmpty>No state found.</CommandEmpty>
+                                                            <CommandGroup>
+                                                                {STATES.map((state) => (
+                                                                    <CommandItem
+                                                                        key={state}
+                                                                        value={state}
+                                                                        onSelect={() => {
+                                                                            field.onChange(state);
+                                                                            form.setValue("city", "");
+                                                                            setStateSearchOpen(false);
+                                                                        }}
+                                                                    >
+                                                                        {state}
+                                                                        <Check
+                                                                            className={`ml-auto h-4 w-4 ${field.value === state ? "opacity-100" : "opacity-0"
+                                                                                }`}
+                                                                        />
+                                                                    </CommandItem>
+                                                                ))}
+                                                            </CommandGroup>
+                                                        </CommandList>
+                                                    </Command>
+                                                </PopoverContent>
+                                            </Popover>
                                             <FormMessage />
                                         </FormItem>
                                     )}
@@ -542,25 +572,49 @@ export default function AddEmployeePage() {
                                     control={form.control}
                                     name="city"
                                     render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>City <span className="text-red-500">*</span></FormLabel>
-                                            <Select
-                                                key={field.value} // Force re-render on value change to ensure placeholder shows
-                                                onValueChange={field.onChange}
-                                                value={field.value}
-                                                disabled={availableCities.length === 0}
-                                            >
-                                                <FormControl>
-                                                    <SelectTrigger className="w-full">
-                                                        <SelectValue placeholder="Choose City" />
-                                                    </SelectTrigger>
-                                                </FormControl>
-                                                <SelectContent>
-                                                    {availableCities.map((city) => (
-                                                        <SelectItem key={city} value={city}>{city}</SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                        <FormItem className="flex flex-col">
+                                            <FormLabel>District <span className="text-red-500">*</span></FormLabel>
+                                            <Popover open={citySearchOpen} onOpenChange={setCitySearchOpen}>
+                                                <PopoverTrigger asChild>
+                                                    <FormControl>
+                                                        <Button
+                                                            variant="outline"
+                                                            role="combobox"
+                                                            className={`w-full justify-between ${!field.value && "text-muted-foreground"}`}
+                                                            disabled={availableCities.length === 0}
+                                                        >
+                                                            {field.value || "Choose District"}
+                                                            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                                                        </Button>
+                                                    </FormControl>
+                                                </PopoverTrigger>
+                                                <PopoverContent className="w-full p-0" align="start">
+                                                    <Command>
+                                                        <CommandInput placeholder="Search district..." />
+                                                        <CommandList>
+                                                            <CommandEmpty>No district found.</CommandEmpty>
+                                                            <CommandGroup>
+                                                                {availableCities.map((city) => (
+                                                                    <CommandItem
+                                                                        key={city}
+                                                                        value={city}
+                                                                        onSelect={() => {
+                                                                            field.onChange(city);
+                                                                            setCitySearchOpen(false);
+                                                                        }}
+                                                                    >
+                                                                        {city}
+                                                                        <Check
+                                                                            className={`ml-auto h-4 w-4 ${field.value === city ? "opacity-100" : "opacity-0"
+                                                                                }`}
+                                                                        />
+                                                                    </CommandItem>
+                                                                ))}
+                                                            </CommandGroup>
+                                                        </CommandList>
+                                                    </Command>
+                                                </PopoverContent>
+                                            </Popover>
                                             <FormMessage />
                                         </FormItem>
                                     )}
@@ -629,7 +683,7 @@ export default function AddEmployeePage() {
                             <div className="mt-6">
                                 <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">Emergency Contacts</h3>
                                 {contactFields.map((field, index) => (
-                                    <div key={field.id} className={`grid grid-cols-1 md:grid-cols-4 gap-4 mb-4 items-start ${form.formState.errors.emergencyContacts?.[index] ? 'border border-red-300 rounded-lg p-3 bg-red-50 dark:bg-red-950/20' : ''}`}>
+                                    <div key={field.id} className={`grid grid-cols-1 md:grid-cols-3 gap-4 mb-4 items-start ${form.formState.errors.emergencyContacts?.[index] ? 'border border-red-300 rounded-lg p-3 bg-red-50 dark:bg-red-950/20' : ''}`}>
                                         <FormField
                                             control={form.control}
                                             name={`emergencyContacts.${index}.name`}
@@ -671,50 +725,50 @@ export default function AddEmployeePage() {
                                             render={({ field }) => (
                                                 <FormItem>
                                                     <FormLabel className={index !== 0 ? "sr-only" : ""}>Phone</FormLabel>
-                                                    <div className="relative flex items-center">
-                                                        <div className="absolute left-3 flex items-center pointer-events-none z-10">
-                                                            <span className="text-sm font-medium text-gray-500 mr-2">+91</span>
-                                                            <div className="h-4 w-[1px] bg-gray-300 dark:bg-zinc-700"></div>
-                                                        </div>
+                                                    <div className="flex gap-2">
                                                         <FormControl>
-                                                            <Input
-                                                                placeholder="XXXXX XXXXX"
-                                                                className="pl-14"
-                                                                inputMode="numeric"
-                                                                value={field.value}
-                                                                onChange={(e) => {
-                                                                    const formatted = formatPhoneNumber(e.target.value);
-                                                                    field.onChange(formatted);
-                                                                    form.trigger(`emergencyContacts.${index}.phone`);
-                                                                }}
-                                                            />
+                                                            <div className="relative flex items-center flex-1">
+                                                                <div className="absolute left-3 flex items-center pointer-events-none z-10">
+                                                                    <span className="text-sm font-medium text-gray-500 mr-2">+91</span>
+                                                                    <div className="h-4 w-[1px] bg-gray-300 dark:bg-zinc-700"></div>
+                                                                </div>
+                                                                <Input
+                                                                    placeholder="XXXXX XXXXX"
+                                                                    className="pl-14"
+                                                                    inputMode="numeric"
+                                                                    value={field.value}
+                                                                    onChange={(e) => {
+                                                                        const formatted = formatPhoneNumber(e.target.value);
+                                                                        field.onChange(formatted);
+                                                                        form.trigger(`emergencyContacts.${index}.phone`);
+                                                                    }}
+                                                                />
+                                                            </div>
                                                         </FormControl>
+                                                        <Button
+                                                            type="button"
+                                                            variant="outline"
+                                                            size="icon"
+                                                            className="text-red-500 hover:text-red-600 shrink-0"
+                                                            disabled={contactFields.length === 1 && index === 0}
+                                                            onClick={() => {
+                                                                form.clearErrors(`emergencyContacts.${index}.name`);
+                                                                form.clearErrors(`emergencyContacts.${index}.relationship`);
+                                                                form.clearErrors(`emergencyContacts.${index}.phone`);
+                                                                setContactToDelete(index);
+                                                                setDeleteDialogOpen(true);
+                                                            }}
+                                                        >
+                                                            <Trash2 className="w-4 h-4" />
+                                                        </Button>
                                                     </div>
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
                                         />
-                                        {index === 0 ? (
-                                            <div />
-                                        ) : (
-                                            <Button
-                                                type="button"
-                                                variant="outline"
-                                                size="icon"
-                                                className="text-red-500 hover:text-red-600"
-                                                onClick={() => {
-                                                    form.clearErrors(`emergencyContacts.${index}.name`);
-                                                    form.clearErrors(`emergencyContacts.${index}.relationship`);
-                                                    form.clearErrors(`emergencyContacts.${index}.phone`);
-                                                    removeContact(index);
-                                                }}
-                                            >
-                                                <Trash2 className="w-4 h-4" />
-                                            </Button>
-                                        )}
                                     </div>
                                 ))}
-                                {contactFields.length < 2 && isLastContactFilled() && (
+                                {contactFields.length < 2 && (
                                     <Button
                                         type="button"
                                         variant="ghost"
@@ -726,6 +780,37 @@ export default function AddEmployeePage() {
                                         <Plus className="w-4 h-4 mr-2" /> Add Another Contact
                                     </Button>
                                 )}
+
+                                <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+                                    <DialogContent>
+                                        <DialogHeader>
+                                            <DialogTitle>Confirm Deletion</DialogTitle>
+                                            <DialogDescription>
+                                                Are you sure you want to delete this emergency contact? This action cannot be undone.
+                                            </DialogDescription>
+                                        </DialogHeader>
+                                        <DialogFooter>
+                                            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
+                                                Cancel
+                                            </Button>
+                                            <Button
+                                                variant="destructive"
+                                                onClick={() => {
+                                                    if (contactToDelete !== null) {
+                                                        form.clearErrors(`emergencyContacts.${contactToDelete}.name`);
+                                                        form.clearErrors(`emergencyContacts.${contactToDelete}.relationship`);
+                                                        form.clearErrors(`emergencyContacts.${contactToDelete}.phone`);
+                                                        removeContact(contactToDelete);
+                                                    }
+                                                    setDeleteDialogOpen(false);
+                                                    setContactToDelete(null);
+                                                }}
+                                            >
+                                                Delete
+                                            </Button>
+                                        </DialogFooter>
+                                    </DialogContent>
+                                </Dialog>
                             </div>
                         </CardContent>
                     </Card>
@@ -1151,7 +1236,8 @@ export default function AddEmployeePage() {
                                                             form.clearErrors(`qualifications.${index}.degree`);
                                                             form.clearErrors(`qualifications.${index}.institution`);
                                                             form.clearErrors(`qualifications.${index}.passingYear`);
-                                                            removeQual(index);
+                                                            setQualToDelete(index);
+                                                            setQualDeleteDialogOpen(true);
                                                         }}
                                                         disabled={qualFields.length === 1 && index === 0}
                                                     >
@@ -1176,6 +1262,34 @@ export default function AddEmployeePage() {
                                     <Plus className="w-4 h-4 mr-2" /> Add Another Qualification
                                 </Button>
                             )}
+
+                            <Dialog open={qualDeleteDialogOpen} onOpenChange={setQualDeleteDialogOpen}>
+                                <DialogContent>
+                                    <DialogHeader>
+                                        <DialogTitle>Confirm Deletion</DialogTitle>
+                                        <DialogDescription>
+                                            Are you sure you want to delete this qualification? This action cannot be undone.
+                                        </DialogDescription>
+                                    </DialogHeader>
+                                    <DialogFooter>
+                                        <Button variant="outline" onClick={() => setQualDeleteDialogOpen(false)}>
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            variant="destructive"
+                                            onClick={() => {
+                                                if (qualToDelete !== null) {
+                                                    removeQual(qualToDelete);
+                                                }
+                                                setQualDeleteDialogOpen(false);
+                                                setQualToDelete(null);
+                                            }}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </DialogFooter>
+                                </DialogContent>
+                            </Dialog>
 
                             <Separator className="my-8" />
 
