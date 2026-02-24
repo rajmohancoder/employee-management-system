@@ -41,7 +41,7 @@ export function Header({ showSearch = true }: HeaderProps) {
                         <SearchIcon className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
                         <input
                             type="text"
-                            placeholder="Search here"
+                            placeholder="Search here please"
                             className="w-full pl-10 pr-4 py-2.5 bg-gray-50 dark:bg-zinc-900 border-none rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-teal-100 dark:focus:ring-teal-900 placeholder-gray-400 dark:placeholder-gray-500 dark:text-gray-200 transition-colors"
                         />
                     </div>
