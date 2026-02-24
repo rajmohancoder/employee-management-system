@@ -103,11 +103,12 @@ const employeeFormSchema = z.object({
         .max(30, "Last name must not exceed 30 characters")
         .regex(/^[A-Za-z\s]+$/, "Only alphabets and spaces are allowed"),
     profilePicture: z.any()
+        .refine((file) => file, "Profile picture is required")
         .refine((file) => !file || file.size <= 2 * 1024 * 1024, "Max file size is 2MB")
         .refine(
             (file) => !file || ["image/jpeg", "image/png", "image/jpg"].includes(file.type),
             "Only .jpg, .jpeg, .png formats are supported"
-        ).optional(),
+        ),
     dob: z.date({ message: "Please select your date of birth" })
         .refine((date) => {
             const today = new Date();
@@ -148,9 +149,19 @@ const employeeFormSchema = z.object({
     branchName: z.string().optional(),
     micrCode: z.string().optional(),
     bankDoc: z.any().optional(),
+    resume: z.any()
+        .optional()
+        .refine((file) => !file || file.size <= 5 * 1024 * 1024, "Max file size is 5MB")
+        .refine(
+            (file) => !file || ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"].includes(file.type),
+            "Only .pdf, .doc, .docx formats are supported"
+        ),
 
     identityProofTypes: z.array(z.string()).min(1, "Please select at least one ID proof type"),
-    identityProofFiles: z.array(z.any()).optional(),
+    identityProofFiles: z.array(z.any())
+        .min(1, "Please upload at least one identity proof document")
+        .refine((files) => files?.every((file: any) => file.size <= 5 * 1024 * 1024), "Max file size is 5MB per file")
+        .refine((files) => files?.every((file: any) => file.type === "application/pdf"), "Only .pdf files are allowed for identity proofs"),
 
     qualifications: z.array(z.object({
         degree: z.string()
@@ -168,8 +179,8 @@ const employeeFormSchema = z.object({
 type EmployeeFormValues = z.infer<typeof employeeFormSchema>
 
 export default function AddEmployeePage() {
-    const today = new Date('2024-12-14');
-    const eighteenYearsAgo = new Date('2006-12-14');
+    const today = new Date();
+    const eighteenYearsAgo = new Date(today.getFullYear() - 18, today.getMonth(), today.getDate());
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [employeeIdError, setEmployeeIdError] = useState<string>("");
     const [isEmployeeIdGenerated, setIsEmployeeIdGenerated] = useState<boolean>(false);
@@ -180,6 +191,13 @@ export default function AddEmployeePage() {
     const [contactToDelete, setContactToDelete] = useState<number | null>(null);
     const [qualDeleteDialogOpen, setQualDeleteDialogOpen] = useState(false);
     const [qualToDelete, setQualToDelete] = useState<number | null>(null);
+    const [bankDocFile, setBankDocFile] = useState<File | null>(null);
+    const [resumeFile, setResumeFile] = useState<File | null>(null);
+    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+    const [identityFiles, setIdentityFiles] = useState<File[]>([]);
+    const [submitDialogOpen, setSubmitDialogOpen] = useState(false);
+    const [revisionDialogOpen, setRevisionDialogOpen] = useState(false);
+    const [submittedData, setSubmittedData] = useState<EmployeeFormValues | null>(null);
 
     const form = useForm<EmployeeFormValues>({
         resolver: zodResolver(employeeFormSchema) as any,
@@ -212,6 +230,7 @@ export default function AddEmployeePage() {
             branchName: "",
             micrCode: "",
             bankDoc: undefined,
+            resume: undefined,
             identityProofTypes: [],
             identityProofFiles: [],
             emergencyContacts: [{ name: "", relationship: undefined, phone: "" }],
@@ -298,7 +317,6 @@ export default function AddEmployeePage() {
         return !!form.formState.errors.qualifications;
     };
 
-    // Check if the last emergency contact is fully filled
     const isLastContactFilled = () => {
         const contacts = form.watch("emergencyContacts");
         if (contacts.length === 0) return false;
@@ -306,9 +324,112 @@ export default function AddEmployeePage() {
         return last.name.trim() && last.relationship && last.phone.trim();
     };
 
+    const formatFileSize = (bytes: number): string => {
+        if (bytes === 0) return "0 Bytes";
+        const k = 1024;
+        const sizes = ["Bytes", "KB", "MB"];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return Math.round(bytes / Math.pow(k, i) * 100) / 100 + " " + sizes[i];
+    };
+
+    const isValidFileType = (file: File, allowedTypes: string[]): boolean => {
+        return allowedTypes.some(type => {
+            if (type.includes("*")) {
+                const [category] = type.split("/");
+                return file.type.startsWith(category);
+            }
+            return file.type === type;
+        });
+    };
+
+    const handleBankDocUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const maxSize = 5 * 1024 * 1024;
+            const allowedTypes = ["application/pdf", "image/jpeg", "image/jpg", "image/png"];
+
+            if (file.size > maxSize) {
+                alert("File size should not exceed 5MB");
+                return;
+            }
+            if (!isValidFileType(file, allowedTypes)) {
+                alert("Only PDF, JPG, and PNG files are allowed");
+                return;
+            }
+            setBankDocFile(file);
+            form.setValue("bankDoc", file);
+        }
+    };
+
+    const handleResumeUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (file) {
+            const maxSize = 5 * 1024 * 1024;
+            const allowedTypes = ["application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"];
+
+            if (file.size > maxSize) {
+                alert("File size should not exceed 5MB");
+                return;
+            }
+            if (!isValidFileType(file, allowedTypes)) {
+                alert("Only PDF, DOC and DOCX files are allowed");
+                return;
+            }
+            setResumeFile(file);
+            form.setValue("resume", file);
+            form.clearErrors("resume");
+        }
+    };
+
+    const handleIdentityFilesUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = Array.from(e.target.files || []);
+        if (files.length > 0) {
+            const maxSize = 5 * 1024 * 1024;
+            const allowedTypes = ["application/pdf"];
+
+            const validFiles = files.filter(file => {
+                if (file.size > maxSize) {
+                    alert(`${file.name} exceeds 5MB`);
+                    return false;
+                }
+                if (!isValidFileType(file, allowedTypes)) {
+                    alert(`${file.name} has unsupported format. Only PDF is allowed.`);
+                    return false;
+                }
+                return true;
+            });
+
+            const newFiles = [...identityFiles, ...validFiles];
+            setIdentityFiles(newFiles);
+            form.setValue("identityProofFiles", newFiles);
+            if (newFiles.length > 0) form.clearErrors("identityProofFiles");
+        }
+    };
+
+    const removeBankDoc = () => {
+        setBankDocFile(null);
+        form.setValue("bankDoc", undefined);
+    };
+
+    const removeResume = () => {
+        setResumeFile(null);
+        form.setValue("resume", undefined);
+    };
+
+    const removeIdentityFile = (index: number) => {
+        const updated = identityFiles.filter((_, i) => i !== index);
+        setIdentityFiles(updated);
+        form.setValue("identityProofFiles", updated);
+        // Trigger validation if empty to show error since it's now mandatory
+        if (updated.length === 0) {
+            form.trigger("identityProofFiles");
+        }
+    };
+
     function onSubmit(data: EmployeeFormValues) {
         console.log(data)
-        alert("Form submitted! Check console for data.")
+        setSubmittedData(data);
+        setSubmitDialogOpen(true);
     }
 
     return (
@@ -689,7 +810,7 @@ export default function AddEmployeePage() {
                                             name={`emergencyContacts.${index}.name`}
                                             render={({ field }) => (
                                                 <FormItem>
-                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Contact Name</FormLabel>
+                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Contact Name <span className="text-red-500">*</span></FormLabel>
                                                     <FormControl>
                                                         <Input placeholder="Full name" {...field} />
                                                     </FormControl>
@@ -702,7 +823,7 @@ export default function AddEmployeePage() {
                                             name={`emergencyContacts.${index}.relationship`}
                                             render={({ field }) => (
                                                 <FormItem>
-                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Relationship</FormLabel>
+                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Relationship <span className="text-red-500">*</span></FormLabel>
                                                     <Select onValueChange={field.onChange} value={field.value}>
                                                         <FormControl>
                                                             <SelectTrigger className="w-full">
@@ -724,7 +845,7 @@ export default function AddEmployeePage() {
                                             name={`emergencyContacts.${index}.phone`}
                                             render={({ field }) => (
                                                 <FormItem>
-                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Phone</FormLabel>
+                                                    <FormLabel className={index !== 0 ? "sr-only" : ""}>Phone <span className="text-red-500">*</span></FormLabel>
                                                     <div className="flex gap-2">
                                                         <FormControl>
                                                             <div className="relative flex items-center flex-1">
@@ -1157,16 +1278,44 @@ export default function AddEmployeePage() {
                                             <FormItem>
                                                 <FormLabel>Cancelled Cheque / Passbook</FormLabel>
                                                 <FormControl>
-                                                    <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors">
-                                                        <UploadCloud className="w-8 h-8 text-blue-500 mb-2" />
-                                                        <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Click to upload bank proof</span>
-                                                        <span className="text-xs text-gray-400 mt-1">PDF, JPG, PNG (Max 5MB)</span>
-                                                        <Input
-                                                            type="file"
-                                                            className="hidden"
-                                                            onChange={(e) => field.onChange(e.target.files ? e.target.files[0] : null)}
-                                                            ref={field.ref}
-                                                        />
+                                                    <div>
+                                                        {!bankDocFile ? (
+                                                            <label className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-lg p-6 flex flex-col items-center justify-center text-center cursor-pointer hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors">
+                                                                <UploadCloud className="w-8 h-8 text-blue-500 mb-2" />
+                                                                <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Click to upload bank proof</span>
+                                                                <span className="text-xs text-gray-400 mt-1">PDF, JPG, PNG (Max 5MB)</span>
+                                                                <Input
+                                                                    type="file"
+                                                                    className="hidden"
+                                                                    accept=".pdf,.jpg,.jpeg,.png"
+                                                                    onChange={handleBankDocUpload}
+                                                                    ref={field.ref}
+                                                                />
+                                                            </label>
+                                                        ) : (
+                                                            <div className="border-2 border-gray-200 dark:border-zinc-800 rounded-lg p-4 bg-gray-50 dark:bg-zinc-900">
+                                                                <div className="flex items-center justify-between">
+                                                                    <div className="flex items-center gap-3">
+                                                                        <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                                                                            <UploadCloud className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                                                                        </div>
+                                                                        <div className="flex-1 min-w-0">
+                                                                            <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{bankDocFile.name}</p>
+                                                                            <p className="text-xs text-gray-500 dark:text-gray-400">{formatFileSize(bankDocFile.size)}</p>
+                                                                        </div>
+                                                                    </div>
+                                                                    <Button
+                                                                        type="button"
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="ml-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900"
+                                                                        onClick={removeBankDoc}
+                                                                    >
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </Button>
+                                                                </div>
+                                                            </div>
+                                                        )}
                                                     </div>
                                                 </FormControl>
                                                 <FormMessage />
@@ -1196,7 +1345,7 @@ export default function AddEmployeePage() {
                                         name={`qualifications.${index}.degree`}
                                         render={({ field }) => (
                                             <FormItem>
-                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Degree</FormLabel>
+                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Degree <span className="text-red-500">*</span></FormLabel>
                                                 <FormControl>
                                                     <Input placeholder="Degree" {...field} onKeyPress={(e) => { if (!/[a-zA-Z\s]/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
                                                 </FormControl>
@@ -1209,7 +1358,7 @@ export default function AddEmployeePage() {
                                         name={`qualifications.${index}.institution`}
                                         render={({ field }) => (
                                             <FormItem>
-                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Institution</FormLabel>
+                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Institution <span className="text-red-500">*</span></FormLabel>
                                                 <FormControl>
                                                     <Input placeholder="Institution" {...field} onKeyPress={(e) => { if (!/[a-zA-Z\s]/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
                                                 </FormControl>
@@ -1222,7 +1371,7 @@ export default function AddEmployeePage() {
                                         name={`qualifications.${index}.passingYear`}
                                         render={({ field }) => (
                                             <FormItem>
-                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Year of Completion</FormLabel>
+                                                <FormLabel className={index !== 0 ? "sr-only" : ""}>Year of Completion <span className="text-red-500">*</span></FormLabel>
                                                 <div className="flex gap-2">
                                                     <FormControl>
                                                         <Input placeholder="YYYY" inputMode="numeric" value={field.value} onChange={(e) => { const formatted = formatYear(e.target.value); field.onChange(formatted); form.trigger(`qualifications.${index}.passingYear`); }} onKeyPress={(e) => { if (!/\d/.test(e.key) && !['Backspace', 'Delete', 'Tab', 'Enter', 'ArrowLeft', 'ArrowRight'].includes(e.key)) e.preventDefault(); }} />
@@ -1295,70 +1444,124 @@ export default function AddEmployeePage() {
 
                             <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-6">Document Uploads</h3>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 auto-rows-max">
                                 {/* Column 1: Profile Picture */}
-                                <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors relative h-full">
-                                    <h4 className="font-medium text-sm mb-4">Profile Picture</h4>
-                                    <FormField
-                                        control={form.control}
-                                        name="profilePicture"
-                                        render={({ field: { value, onChange, ...fieldProps } }) => (
-                                            <FormItem className="flex flex-col items-center w-full">
-                                                <FormControl>
-                                                    <div className="relative w-24 h-24 rounded-full border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center cursor-pointer hover:bg-white dark:hover:bg-zinc-800 transition-colors overflow-hidden group">
-                                                        {previewUrl ? (
-                                                            <img
-                                                                src={previewUrl}
-                                                                alt="Profile Preview"
-                                                                className="w-full h-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <div className="flex flex-col items-center text-gray-400">
-                                                                <User className="w-6 h-6 mb-1" />
-                                                                <span className="text-[10px] font-medium">Upload</span>
-                                                            </div>
-                                                        )}
+                                <FormField
+                                    control={form.control}
+                                    name="profilePicture"
+                                    render={({ field: { onChange, ...fieldProps } }) => (
+                                        <FormItem className="flex flex-col h-full">
+                                            <FormControl>
+                                                <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors relative aspect-square w-full">
+                                                    <label className="w-full h-full flex flex-col items-center justify-center cursor-pointer">
+                                                        <h4 className="font-medium text-sm mb-4 text-gray-900 dark:text-white">Profile Picture <span className="text-red-500">*</span></h4>
+                                                        <div className="relative w-24 h-24 rounded-full border-2 border-dashed border-gray-300 dark:border-gray-700 flex items-center justify-center cursor-pointer hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors overflow-hidden mb-4">
+                                                            {previewUrl ? (
+                                                                <img
+                                                                    src={previewUrl}
+                                                                    alt="Profile Preview"
+                                                                    className="w-full h-full object-cover"
+                                                                />
+                                                            ) : (
+                                                                <div className="flex flex-col items-center text-gray-400 dark:text-gray-600">
+                                                                    <User className="w-6 h-6 mb-1" />
+                                                                    <span className="text-[10px] font-medium">Upload</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">JPG, PNG, JPEG (Max 2MB)</p>
                                                         <Input
                                                             {...fieldProps}
+                                                            value={undefined}
                                                             type="file"
                                                             accept="image/png, image/jpeg, image/jpg"
-                                                            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                                                            className="hidden"
                                                             onChange={(event) => {
                                                                 const file = event.target.files && event.target.files[0];
                                                                 if (file) {
-                                                                    onChange(file);
+                                                                    if (file.size > 2 * 1024 * 1024) {
+                                                                        alert("File size should not exceed 2MB");
+                                                                        return;
+                                                                    }
+                                                                    if (!["image/jpeg", "image/png", "image/jpg"].includes(file.type)) {
+                                                                        alert("Only JPG, JPEG, and PNG files are allowed");
+                                                                        return;
+                                                                    }
+                                                                    form.setValue("profilePicture", file);
                                                                     const url = URL.createObjectURL(file);
                                                                     setPreviewUrl(url);
+                                                                    form.trigger("profilePicture");
                                                                 }
                                                             }}
                                                         />
-                                                    </div>
-                                                </FormControl>
-                                                <FormMessage />
-                                            </FormItem>
-                                        )}
-                                    />
-                                    <p className="text-xs text-gray-500 mt-4">JPG, PNG up to 2MB</p>
-                                </div>
+                                                    </label>
+                                                </div>
+                                            </FormControl>
+                                            <FormMessage className="mt-2" />
+                                        </FormItem>
+                                    )}
+                                />
 
                                 {/* Column 2: Resume Upload */}
-                                <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors cursor-pointer relative h-full">
-                                    <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-3">
-                                        <UploadCloud className="w-5 h-5" />
-                                    </div>
-                                    <h4 className="font-medium text-sm">Upload Resume/CV</h4>
-                                    <p className="text-xs text-gray-500 mt-1">PDF, DOCX up to 5MB</p>
-                                    <Input type="file" className="absolute inset-0 opacity-0 cursor-pointer" />
-                                </div>
+                                <FormField
+                                    control={form.control}
+                                    name="resume"
+                                    render={({ field }) => (
+                                        <FormItem className="flex flex-col h-full">
+                                            <FormControl>
+                                                {!resumeFile ? (
+                                                    <label className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-6 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors cursor-pointer relative aspect-square w-full">
+                                                        <div className="w-10 h-10 rounded-full bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-3">
+                                                            <UploadCloud className="w-5 h-5" />
+                                                        </div>
+                                                        <h4 className="font-medium text-sm text-gray-900 dark:text-white">Upload Resume/CV</h4>
+                                                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">PDF, DOC, DOCX up to 5MB</p>
+                                                        <Input
+                                                            type="file"
+                                                            className="hidden"
+                                                            accept=".pdf,.doc,.docx"
+                                                            onChange={handleResumeUpload}
+                                                            ref={field.ref}
+                                                        />
+                                                    </label>
+                                                ) : (
+                                                    <div className="border-2 border-gray-200 dark:border-zinc-800 rounded-xl p-4 bg-gray-50 dark:bg-zinc-900 aspect-square w-full flex flex-col justify-center">
+                                                        <div className="flex items-center justify-between">
+                                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                                                <div className="w-10 h-10 rounded-lg bg-blue-100 dark:bg-blue-900 flex items-center justify-center shrink-0">
+                                                                    <UploadCloud className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                                                                </div>
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{resumeFile.name}</p>
+                                                                    <p className="text-xs text-gray-500 dark:text-gray-400">{formatFileSize(resumeFile.size)}</p>
+                                                                </div>
+                                                            </div>
+                                                            <Button
+                                                                type="button"
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="ml-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900 shrink-0"
+                                                                onClick={removeResume}
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </Button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </FormControl>
+                                            <FormMessage className="mt-2" />
+                                        </FormItem>
+                                    )}
+                                />
 
                                 {/* Column 3: Identity Proofs */}
-                                <div className="flex flex-col gap-4">
+                                <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-6 flex flex-col aspect-square w-full">
                                     <FormField
                                         control={form.control}
                                         name="identityProofTypes"
                                         render={({ field }) => (
-                                            <FormItem>
-                                                <FormLabel className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Identity Proofs</FormLabel>
+                                            <FormItem className="mb-6">
+                                                <FormLabel className="text-xs uppercase tracking-wider text-gray-500 font-semibold block mb-3">Identity Proofs <span className="text-red-500">*</span></FormLabel>
                                                 <FormControl>
                                                     <MultiSelect
                                                         options={IDENTITY_PROOFS.map(id => ({ label: id, value: id }))}
@@ -1374,14 +1577,65 @@ export default function AddEmployeePage() {
                                         )}
                                     />
 
-                                    <div className="border-2 border-dashed border-gray-200 dark:border-zinc-800 rounded-xl p-4 flex flex-col items-center justify-center text-center hover:bg-gray-50 dark:hover:bg-zinc-900 transition-colors cursor-pointer relative flex-1">
-                                        <div className="w-8 h-8 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mb-2">
-                                            <UploadCloud className="w-4 h-4" />
-                                        </div>
-                                        <h4 className="font-medium text-xs">Upload Files</h4>
-                                        <p className="text-[10px] text-gray-500 mt-0.5">PDF, JPG</p>
-                                        <Input type="file" multiple className="absolute inset-0 opacity-0 cursor-pointer" />
-                                    </div>
+                                    <Separator className="my-4" />
+
+                                    <FormField
+                                        control={form.control}
+                                        name="identityProofFiles"
+                                        render={({ field }) => (
+                                            <FormItem className="flex-1 flex flex-col">
+                                                <FormLabel className={identityFiles.length === 0 ? "sr-only" : "sr-only"}>Identity Proof Files <span className="text-red-500">*</span></FormLabel>
+                                                <FormControl>
+                                                    <div className="flex flex-col gap-3 flex-1">
+                                                        {identityFiles.length < 3 && (
+                                                            <label className={`border-2 border-dashed ${form.formState.errors.identityProofFiles ? "border-red-500 bg-red-50 dark:bg-red-950/20" : "border-gray-300 dark:border-gray-700"} rounded-lg p-4 flex flex-col items-center justify-center text-center hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer relative flex-1`}>
+                                                                <div className="w-8 h-8 rounded-full bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-400 flex items-center justify-center mb-2">
+                                                                    <UploadCloud className="w-4 h-4" />
+                                                                </div>
+                                                                <h4 className="font-medium text-xs text-gray-900 dark:text-white">Upload Files <span className="text-red-500">*</span></h4>
+                                                                <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">PDF Only (Max 5MB each)</p>
+                                                                <Input
+                                                                    type="file"
+                                                                    multiple
+                                                                    className="hidden"
+                                                                    accept=".pdf"
+                                                                    onChange={handleIdentityFilesUpload}
+                                                                />
+                                                            </label>
+                                                        )}
+
+                                                        {identityFiles.length > 0 && (
+                                                            <div className="space-y-2 flex-1">
+                                                                {identityFiles.map((file, index) => (
+                                                                    <div key={`${file.name}-${index}`} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-zinc-900 rounded-lg border border-gray-200 dark:border-zinc-800">
+                                                                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                                                                            <div className="w-8 h-8 rounded bg-blue-100 dark:bg-blue-900 flex items-center justify-center shrink-0">
+                                                                                <UploadCloud className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                                                                            </div>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{file.name}</p>
+                                                                                <p className="text-[10px] text-gray-500 dark:text-gray-400">{formatFileSize(file.size)}</p>
+                                                                            </div>
+                                                                        </div>
+                                                                        <Button
+                                                                            type="button"
+                                                                            variant="ghost"
+                                                                            size="icon"
+                                                                            className="ml-2 text-red-500 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900 shrink-0 h-8 w-8"
+                                                                            onClick={() => removeIdentityFile(index)}
+                                                                        >
+                                                                            <Trash2 className="w-3 h-3" />
+                                                                        </Button>
+                                                                    </div>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </FormControl>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
                                 </div>
                             </div>
 
@@ -1393,13 +1647,258 @@ export default function AddEmployeePage() {
                         <Button
                             type="submit"
                             className="bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                            disabled={!form.formState.isValid}
                         >
                             Submit Onboarding
                         </Button>
                     </div>
                 </form>
             </Form>
+
+            {/* Submit Confirmation Dialog */}
+            <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
+                <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+                    <DialogHeader>
+                        <div className="flex flex-col md:flex-row justify-between items-start gap-4">
+                            <div>
+                                <DialogTitle className="text-xl font-bold font-sans">Data Verification Audit</DialogTitle>
+                                <DialogDescription className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                    Review all submitted employee data for accuracy and compliance.
+                                </DialogDescription>
+                            </div>
+                            {previewUrl && (
+                                <div className="shrink-0 border-2 border-white dark:border-zinc-800 shadow-sm rounded-lg overflow-hidden w-16 h-16 md:w-20 md:h-20 bg-gray-100 dark:bg-zinc-800">
+                                    <img src={previewUrl} alt="Profile" className="w-full h-full object-cover" />
+                                </div>
+                            )}
+                        </div>
+                    </DialogHeader>
+                    {submittedData && (
+                        <div className="space-y-8 py-4">
+                            {/* Personal Information */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-4">
+                                    <User className="w-4 h-4 text-blue-600" />
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Personal Information</h3>
+                                </div>
+                                <div className="space-y-4 pl-6 border-l-2 border-gray-100 dark:border-zinc-800 ml-2">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        <div className="col-span-1">
+                                            <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Full Name</p>
+                                            <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.firstName} {submittedData.lastName}</p>
+                                        </div>
+                                        {submittedData.dob && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Date of Birth</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{format(submittedData.dob, "MMM dd, yyyy", { locale: enIN })}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.gender && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Gender</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{submittedData.gender}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.maritalStatus && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Marital Status</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{submittedData.maritalStatus}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        {submittedData.state && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">State</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.state}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.email && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Email</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium truncate" title={submittedData.email}>{submittedData.email}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.phone && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Phone</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">+91 {submittedData.phone}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        {submittedData.address && (
+                                            <div className="col-span-2">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Residential Address</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium line-clamp-1" title={submittedData.address}>{submittedData.address}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.emergencyContacts?.[0] && (
+                                            <>
+                                                <div className="col-span-1">
+                                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Emergency Contact</p>
+                                                    <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.emergencyContacts[0].name}</p>
+                                                    <p className="text-[10px] text-gray-500">{submittedData.emergencyContacts[0].relationship}</p>
+                                                </div>
+                                                <div className="col-span-1">
+                                                    <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Emergency Phone</p>
+                                                    <p className="text-sm text-gray-900 dark:text-white font-medium">+91 {submittedData.emergencyContacts[0].phone}</p>
+                                                </div>
+                                            </>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Employment Details */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-4 h-4 flex items-center justify-center">
+                                        <div className="w-3 h-3 bg-blue-600 rounded-sm"></div>
+                                    </div>
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Employment Details</h3>
+                                </div>
+                                <div className="space-y-4 pl-6 border-l-2 border-gray-100 dark:border-zinc-800 ml-2">
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        {submittedData.jobTitle && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Job Title</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{submittedData.jobTitle.replace(/-/g, ' ')}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.department && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Department</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium capitalize">{submittedData.department}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.employeeId && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Employee ID</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.employeeId}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.reportingManager && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Manager</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.reportingManager}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                                        {submittedData.hireDate && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Hire Date</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{format(submittedData.hireDate, "MMM dd, yyyy", { locale: enIN })}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.annualCompensation && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Compensation</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">₹{submittedData.annualCompensation}/yr</p>
+                                            </div>
+                                        )}
+                                        {submittedData.bankName && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">Bank Name</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium">{submittedData.bankName}</p>
+                                            </div>
+                                        )}
+                                        {submittedData.panCardNumber && (
+                                            <div className="col-span-1">
+                                                <p className="text-[10px] text-gray-400 uppercase tracking-wider font-semibold mb-1">PAN Number</p>
+                                                <p className="text-sm text-gray-900 dark:text-white font-medium uppercase">{submittedData.panCardNumber}</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Qualifications & Compliance boxes */}
+                            <div>
+                                <div className="flex items-center gap-2 mb-4">
+                                    <div className="w-4 h-4 flex items-center justify-center">
+                                        <div className="w-3 h-3 bg-blue-600 rounded-full"></div>
+                                    </div>
+                                    <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wider">Qualifications & Compliance</h3>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 ml-6">
+                                    <div className="border border-gray-200 dark:border-zinc-800 rounded-lg p-4">
+                                        <p className="text-xs font-bold text-gray-900 dark:text-white mb-3">Education History</p>
+                                        {submittedData.qualifications.length > 0 ? submittedData.qualifications.map((qual, index) => (
+                                            <div key={index} className="flex items-start gap-2 mb-3 last:mb-0">
+                                                <div className="w-1.5 h-1.5 rounded-full bg-blue-400 mt-1.5 shrink-0"></div>
+                                                <div>
+                                                    <p className="text-sm text-gray-900 dark:text-white font-medium">{qual.degree}</p>
+                                                    <p className="text-[10px] text-gray-500 text-xs">Institution: {qual.institution}, Year: {qual.passingYear}</p>
+                                                </div>
+                                            </div>
+                                        )) : <p className="text-xs text-gray-500">No qualifications added</p>}
+                                    </div>
+
+                                    <div className="border border-gray-200 dark:border-zinc-800 rounded-lg p-4">
+                                        <p className="text-xs font-bold text-gray-900 dark:text-white mb-3">Attached Documents</p>
+                                        <div className="space-y-2">
+                                            {submittedData.resume && (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-4 h-4 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                                                        <Check className="w-2.5 h-2.5 text-green-600 dark:text-green-400" />
+                                                    </div>
+                                                    <p className="text-xs text-gray-700 dark:text-gray-300 font-medium">Resume_{submittedData.firstName}.pdf</p>
+                                                </div>
+                                            )}
+                                            {submittedData.identityProofTypes.map((proof, index) => (
+                                                <div key={index} className="flex items-center gap-2">
+                                                    <div className="w-4 h-4 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                                                        <Check className="w-2.5 h-2.5 text-green-600 dark:text-green-400" />
+                                                    </div>
+                                                    <p className="text-xs text-gray-700 dark:text-gray-300 font-medium">{proof.replace(/ /g, '_')}.pdf</p>
+                                                </div>
+                                            ))}
+                                            {submittedData.bankDoc && (
+                                                <div className="flex items-center gap-2">
+                                                    <div className="w-4 h-4 rounded-full bg-green-100 dark:bg-green-900 flex items-center justify-center">
+                                                        <Check className="w-2.5 h-2.5 text-green-600 dark:text-green-400" />
+                                                    </div>
+                                                    <p className="text-xs text-gray-700 dark:text-gray-300 font-medium">Bank_Document.pdf</p>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                    <DialogFooter className="gap-2 pt-4 border-t border-gray-100 dark:border-zinc-800">
+                        <Button variant="outline" className="h-9" onClick={() => setRevisionDialogOpen(true)}>
+                            Request Revisions
+                        </Button>
+                        <Button className="bg-green-600 hover:bg-green-700 text-white h-9" onClick={() => setSubmitDialogOpen(false)}>
+                            <Check className="w-4 h-4 mr-2" />
+                            Verify & Approve
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Revision Confirmation Dialog */}
+            <Dialog open={revisionDialogOpen} onOpenChange={setRevisionDialogOpen}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Request Revisions</DialogTitle>
+                        <DialogDescription>
+                            Are you sure you want to request revisions? This will return the application to the candidate.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter className="gap-2">
+                        <Button variant="outline" onClick={() => setRevisionDialogOpen(false)}>Cancel</Button>
+                        <Button variant="destructive" onClick={() => {
+                            setRevisionDialogOpen(false);
+                            setSubmitDialogOpen(false);
+                        }}>Request Revisions</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div >
     )
 }
